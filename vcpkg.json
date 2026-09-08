@@ -1,0 +1,12 @@
+{
+  "name": "hwpanel",
+  "version-string": "0.1.0",
+  "description": "HWPanel: Windows hardware monitoring & configuration center",
+  "dependencies": [
+    "grpc",
+    "protobuf",
+    "gtest",
+    "nlohmann-json",
+    "spdlog"
+  ]
+}

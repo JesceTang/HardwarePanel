@@ -1,0 +1,113 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6.8
+        id: qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/out/build/win-x64-ci/vcpkg_installed
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Configure
+        shell: pwsh
+        env:
+          Qt6_DIR: ${{ steps.qt.outputs.qt_dir }}\lib\cmake\Qt6
+        run: cmake --preset win-x64-ci
+
+      - name: Build
+        run: cmake --build --preset win-x64-ci --parallel
+
+      - name: Test
+        run: ctest --preset win-x64-ci
+
+  installer:
+    needs: build-and-test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6.8
+        id: qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: 6.8.3
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Install Inno Setup 6
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri 'https://jrsoftware.org/download.php/is.exe' -OutFile "$env:RUNNER_TEMP\is.exe" -UseBasicParsing
+          Start-Process "$env:RUNNER_TEMP\is.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+          echo "ISCC=${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" >> $env:GITHUB_ENV
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ github.workspace }}/out/build/win-x64-ci/vcpkg_installed
+            C:\Users\runneradmin\AppData\Local\vcpkg\archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+
+      - name: Build installer (windeployqt + Inno)
+        shell: pwsh
+        env:
+          Qt6_DIR: ${{ steps.qt.outputs.qt_dir }}\lib\cmake\Qt6
+        run: .\scripts\build-installer.ps1 -Preset win-x64-ci
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hwpanel-setup
+          path: out/packages/*.exe
+
+  service-smoke:
+    # M3/M6 运行时验收：windows-latest runner 具备管理员权限，可真实注册/恢复/卸载服务
+    needs: installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hwpanel-setup
+          path: out/packages
+
+      - name: Install via setup (M6 install path, registers + starts service)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem 'out\packages\*.exe' | Select-Object -First 1
+          Start-Process $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
+
+      - name: M3 service smoke (running/eventlog/recover<=30s/pause/continue)
+        shell: pwsh
+        run: .\scripts\smoke-service.ps1
+
+      - name: Uninstall via setup (M6 cleanup path) + residue assert
+        shell: pwsh
+        run: |
+          $un = Get-ChildItem "$env:ProgramFiles\HWPanel\unins000.exe","${env:ProgramFiles(x86)}\HWPanel\unins000.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $un) { throw 'uninstaller not found' }
+          Start-Process $un.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -Wait
+          if (Get-Service HWPanelService -ErrorAction SilentlyContinue) { throw 'service residue after uninstall' }
+          Write-Host 'uninstall clean'

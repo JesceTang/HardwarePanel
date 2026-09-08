@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package hwpanel.v1;
+
+// A persisted configuration profile: an ordered set of executor settings.
+message Profile {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  map<string, string> settings = 4;  // executor key -> desired value
+}
+
+message ListProfilesRequest {}
+
+message ListProfilesResponse {
+  repeated Profile profiles = 1;
+  string active_profile_id = 2;
+}
+
+message SwitchProfileRequest {
+  string profile_id = 1;
+}
+
+message SwitchProfileResponse {
+  bool ok = 1;
+  string message = 2;
+  repeated string rolled_back_keys = 3;  // executors restored after a failed apply
+}
+
+message ServiceStatus {
+  string version = 1;
+  string state = 2;        // RUNNING / PAUSED / ...
+  int64 uptime_ms = 3;
+  string endpoint = 4;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  ServiceStatus status = 1;
+}
+
+message EventMessage {
+  int64 timestamp_ms = 1;
+  string level = 2;        // info / warn / error
+  string title = 3;
+  string message = 4;
+}
+
+message WatchEventsRequest {}
+
+service CommandService {
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse);
+  rpc SwitchProfile(SwitchProfileRequest) returns (SwitchProfileResponse);
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  // Server-streaming notifications (profile applied/rolled back, errors...).
+  rpc WatchEvents(WatchEventsRequest) returns (stream EventMessage);
+}

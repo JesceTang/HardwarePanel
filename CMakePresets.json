@@ -1,0 +1,63 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 23,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "win-x64",
+      "displayName": "Windows x64 Ninja + vcpkg (local)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "environment": {
+        "VCPKG_ROOT": "E:/vcpkg"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "HWPanel_BUILD_TESTS": "ON"
+      }
+    },
+    {
+      "name": "win-x64-ci",
+      "displayName": "Windows x64 Ninja + vcpkg (CI)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/${presetName}",
+      "installDir": "${sourceDir}/out/install/${presetName}",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_TOOLCHAIN_FILE": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+        "HWPanel_BUILD_TESTS": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "win-x64",
+      "configurePreset": "win-x64"
+    },
+    {
+      "name": "win-x64-ci",
+      "configurePreset": "win-x64-ci"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "win-x64",
+      "configurePreset": "win-x64",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "win-x64-ci",
+      "configurePreset": "win-x64-ci",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

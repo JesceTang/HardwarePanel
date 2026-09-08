@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package hwpanel.v1;
+
+// One numeric measurement produced by a collector plugin.
+message MetricSample {
+  string metric_id = 1;              // e.g. "cpu.usage_pct"
+  double value = 2;
+  string unit = 3;                   // e.g. "percent", "mhz", "mb", "bps"
+  map<string, string> labels = 4;    // e.g. {"gpu": "0"}
+}
+
+// All metrics captured at one sampling tick.
+message TelemetrySample {
+  int64 timestamp_ms = 1;            // unix epoch milliseconds (service clock)
+  repeated MetricSample metrics = 2;
+}
+
+message SubscribeTelemetryRequest {
+  double interval_hz = 1;            // desired push rate, <=0 means service default (1 Hz)
+  repeated string metric_filter = 2; // empty means "all metrics"
+}
+
+message GetHistoryRequest {
+  int32 seconds = 1;                 // how many seconds of history to return (capped server-side)
+}
+
+message GetHistoryResponse {
+  repeated TelemetrySample samples = 1;
+}
+
+service TelemetryService {
+  // Server-streaming subscription of live telemetry.
+  rpc Subscribe(SubscribeTelemetryRequest) returns (stream TelemetrySample);
+  // Recent history from the service-side ring buffer.
+  rpc GetHistory(GetHistoryRequest) returns (GetHistoryResponse);
+}
