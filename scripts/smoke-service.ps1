@@ -15,11 +15,19 @@ if ($state -ne 'Running') { throw "service not Running: $state" }
 Write-Host "[smoke] service RUNNING"
 
 # ---- 事件日志断言：EventLogSink 以来源 HWPanel 写入 Application 日志 ----
-Start-Sleep -Seconds 2
-$events = Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'HWPanel' } `
-            -MaxEvents 5 -ErrorAction SilentlyContinue
-if (-not $events) { throw 'no HWPanel events in Application log' }
-Write-Host "[smoke] event log source HWPanel present ($($events.Count) recent events)"
+# 注：EventLogSink 用 RegisterEventSourceW(nullptr, "HWPanel")，来源未注册时 Windows 会降级到
+# EventCreateGeneric 写入；此时带 ProviderName 的 FilterHashtable 查询会报拒绝访问（本机 Win11
+# 家庭版已实测）。故改为无过滤器读取 + 客户端过滤，并给出重试窗口等待日志落盘。
+$events = @()
+for ($i = 0; $i -lt 6; $i++) {
+    Start-Sleep -Seconds 2
+    $recent = Get-WinEvent -FilterHashtable @{ LogName = 'Application' } -MaxEvents 300 `
+              -ErrorAction SilentlyContinue
+    $events = @($recent | Where-Object { $_.ProviderName -eq 'HWPanel' })
+    if ($events.Count -gt 0) { break }
+}
+if ($events.Count -eq 0) { throw 'no HWPanel events in Application log' }
+Write-Host "[smoke] event log source HWPanel present ($($events.Count) events)"
 
 # ---- taskkill → SCM 崩溃恢复（sc failure restart/10000）应 ≤30 s 自恢复 ----
 $proc = Get-Process -Name hwpanel-service -ErrorAction SilentlyContinue | Select-Object -First 1

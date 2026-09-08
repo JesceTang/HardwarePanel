@@ -45,6 +45,15 @@ Name: "{group}\HWPanel"; Filename: "{app}\{#MyAppExeName}"
 Name: "{group}\{cm:UninstallProgram,HWPanel}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\HWPanel"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
+[Registry]
+; 注册事件日志来源 HWPanel（M3 Event Log 验收）。
+; EventLogSink 调 RegisterEventSourceW(nullptr, "HWPanel")；来源未注册时 Windows 降级到
+; EventCreateGeneric，事件能写入但 Message 为空、且带 ProviderName 的查询会拒绝访问。
+; 无自定义消息资源文件，故复用系统通用提供器使消息可渲染。
+Root: HKLM64; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\HWPanel"; Flags: uninsdeletekey
+Root: HKLM64; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\HWPanel"; ValueType: expandsz; ValueName: "EventMessageFile"; ValueData: "{sys}\EventCreateGeneric.exe"; Flags: uninsdeletevalue
+Root: HKLM64; Subkey: "SYSTEM\CurrentControlSet\Services\EventLog\Application\HWPanel"; ValueType: dword; ValueName: "TypesSupported"; ValueData: "7"; Flags: uninsdeletevalue
+
 [Run]
 ; 注册服务：SYSTEM 账户、开机自启、崩溃自动重启（M3/M6 验收项）
 Filename: "sc.exe"; Parameters: "create {#MySvcName} binPath= ""{app}\{#MySvcExeName}"" start= auto DisplayName= ""HWPanel Hardware Monitor Service"""; Flags: runhidden

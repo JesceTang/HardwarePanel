@@ -11,6 +11,10 @@ qt_add_executable(hwpanel-client WIN32
     backend/profile_model.cpp
     backend/telemetry_store.cpp)
 
+# QTP0004=NEW：QML_FILES 保留其目录结构（资源路径为 /HWPanel/qml/Main.qml，
+# 与 main.cpp 的加载路径一致），同时消除“子目录缺 qmldir”的开发者警告。
+qt_policy(SET QTP0004 NEW)
+
 qt_add_qml_module(hwpanel-client
     URI HWPanel
     VERSION 1.0

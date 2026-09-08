@@ -16,7 +16,12 @@ if (Test-Path $vcvars) {
         if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
     }
 }
-$env:VCPKG_ROOT = 'E:\vcpkg'
+# VCPKG_ROOT：CI 由 workflow 注入（lukka/run-vcpkg 导出），本地开发回退到 E:\vcpkg。
+# win-x64-ci preset 的 CMAKE_TOOLCHAIN_FILE 依赖该变量，缺失会导致 configure 失败。
+if (-not $env:VCPKG_ROOT) { $env:VCPKG_ROOT = 'E:\vcpkg' }
+if (-not (Test-Path (Join-Path $env:VCPKG_ROOT 'scripts\buildsystems\vcpkg.cmake'))) {
+    throw "VCPKG_ROOT 无效（缺 scripts\buildsystems\vcpkg.cmake）：$env:VCPKG_ROOT"
+}
 
 # ---- 定位 cmake / Qt / ISCC ----
 $cmake = Get-Command cmake -ErrorAction SilentlyContinue
@@ -27,12 +32,20 @@ if (-not $cmake) {
 
 $qtDir = $env:Qt6_DIR
 if (-not $qtDir) {
+    # 本地回退：aqt 安装布局 E:\Qt\6.x\msvc2022_64\lib\cmake\Qt6
     $qtDir = Get-ChildItem 'E:\Qt\6.*\msvc2022_64\lib\cmake\Qt6' -ErrorAction SilentlyContinue |
              Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
 }
 if (-not $qtDir) { throw '找不到 Qt6（设置 Qt6_DIR 或安装到 E:\Qt）' }
-$qtBin = Join-Path (Split-Path (Split-Path (Split-Path $qtDir))) 'bin'   # ...\msvc2022_64\bin
+# Qt6_DIR 形如 ...\msvc2022_64\lib\cmake\Qt6，向上三级到套件根后取 bin
+$qtBin = Join-Path (Split-Path (Split-Path (Split-Path $qtDir))) 'bin'
 $windeployqt = Join-Path $qtBin 'windeployqt.exe'
+if (-not (Test-Path $windeployqt)) {
+    # 回退：CI 已将 qt_bin 加入 PATH
+    $cmd = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
+    if (-not $cmd) { throw "找不到 windeployqt.exe（推导路径 $windeployqt）" }
+    $windeployqt = $cmd.Source
+}
 
 $iscc = Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
 if (-not $iscc) {

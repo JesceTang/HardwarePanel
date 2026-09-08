@@ -19,6 +19,13 @@ jobs:
           arch: win64_msvc2022_64
           cache: true
 
+      # vcpkg 引导：win-x64-ci preset 的 CMAKE_TOOLCHAIN_FILE 引用 $env{VCPKG_ROOT}，
+      # runner 上无预置 vcpkg，必须由本 action 克隆并导出 VCPKG_ROOT，否则 configure 失败。
+      - name: Bootstrap vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 98d7cb0cf1f4686a3e43aa5672b6230c1d56bce8
+
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
@@ -30,7 +37,9 @@ jobs:
       - name: Configure
         shell: pwsh
         env:
-          Qt6_DIR: ${{ steps.qt.outputs.qt_dir }}\lib\cmake\Qt6
+          # install-qt-action 的 qt_dir 已指向 <qt_host_path>\lib\cmake\Qt6，不可再追加后缀
+          Qt6_DIR: ${{ steps.qt.outputs.qt_dir }}
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
         run: cmake --preset win-x64-ci
 
       - name: Build
@@ -60,6 +69,11 @@ jobs:
           Start-Process "$env:RUNNER_TEMP\is.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
           echo "ISCC=${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" >> $env:GITHUB_ENV
 
+      - name: Bootstrap vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: 98d7cb0cf1f4686a3e43aa5672b6230c1d56bce8
+
       - name: Cache vcpkg packages
         uses: actions/cache@v4
         with:
@@ -71,8 +85,13 @@ jobs:
       - name: Build installer (windeployqt + Inno)
         shell: pwsh
         env:
-          Qt6_DIR: ${{ steps.qt.outputs.qt_dir }}\lib\cmake\Qt6
-        run: .\scripts\build-installer.ps1 -Preset win-x64-ci
+          Qt6_DIR: ${{ steps.qt.outputs.qt_dir }}
+          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
+        run: |
+          # windeployqt 位于 qt_bin；入 PATH 后 build-installer.ps1 能直接定位
+          echo "${{ steps.qt.outputs.qt_bin }}" >> $env:GITHUB_PATH
+          $env:PATH = "${{ steps.qt.outputs.qt_bin }};" + $env:PATH
+          .\scripts\build-installer.ps1 -Preset win-x64-ci
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4

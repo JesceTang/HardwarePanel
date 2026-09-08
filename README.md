@@ -53,9 +53,18 @@
 
 - 纯本地 IPC，无网络栈暴露面；管道不存在"端口被扫描/占用"问题。
 - 安全由 **管道 ACL** 承载：服务以 LocalSystem 创建管道，安全描述符只授权 `SYSTEM`、`Administrators` 与交互用户（Authenticated Users 受限令牌），非授权进程无法连接——这是选 named pipe 而非 TCP 的核心原因。
-- gRPC C++ 自 v1.4x 起原生支持 `np:` URI，protobuf 契约、服务端流、deadline 语义全部复用。
+- gRPC 的 protobuf 契约、服务端流、deadline 语义全部复用，换传输不换业务代码。
 
-**回退 `127.0.0.1:50051`（localhost TCP）**：当 gRPC 版本对 `np:` 支持不足或管道创建失败时，服务端自动回退并记录告警（见 `service_host.cpp` 的 `BuildServer`）。回退模式下仅监听回环地址；README 记录该决策，客户端通过环境变量 `HWPANEL_ENDPOINT` 显式覆盖。
+> **实测结果（M1 定案）**：本机 vcpkg 安装的 **gRPC 1.81.1 并不接受 `np:` URI**，`BuildServer` 返回
+> `Failed to add port to server: Failed to parse port in name: np:\\.\pipe\hwpanel`。
+> 因此当前构建下 **实际生效的传输是回退路径 `127.0.0.1:50051`**；named pipe 代码路径与 ACL
+> 安全描述符已完整实现并保留，待所用 gRPC 版本支持 `np:` 后无需改业务代码即可切回。
+
+**回退 `127.0.0.1:50051`（localhost TCP）**：当 gRPC 版本对 `np:` 支持不足或管道创建失败时，服务端自动回退并记录告警（见 `service_host.cpp` 的 `BuildServer`），`GetStatus` 返回的 `endpoint` 字段即为实际监听地址。回退模式下仅监听回环地址，不对外网暴露；客户端通过环境变量 `HWPANEL_ENDPOINT` 显式覆盖：
+
+```powershell
+$env:HWPANEL_ENDPOINT = '127.0.0.1:50051'   # 回退模式下启动客户端/冒烟工具所需
+```
 
 ## 权限模型
 
@@ -64,7 +73,7 @@
 | hwpanel-service | `LocalSystem` | SCM 注册（`sc create ... start= auto`）；可读所有 PDH/WMI 计数器、调 powrprof 电源计划、写 `%ProgramData%\HWPanel` |
 | named pipe ACL | — | SYSTEM + Administrators + 交互用户可读写；其余拒绝 |
 | hwpanel-client | 登录用户 | 无特权；一切系统级操作经 gRPC 委托给服务 |
-| 崩溃恢复 | SCM | `sc failure HWPanelService reset=86400 actions=restart/60000×3` + `failureflag 1`；客户端指数退避重连（1→15 s）+ ChannelManager 看门狗，双保险 |
+| 崩溃恢复 | SCM | `sc failure HWPanelService reset=86400 actions=restart/10000×3` + `failureflag 1`（10 s 重启间隔以满足 M3“taskkill 后 ≤30 s 自恢复”验收）；客户端指数退避重连（1→15 s）+ ChannelManager 看门狗，双保险 |
 | 配置写入 | 服务 | `%ProgramData%\HWPanel\profiles.json`，仅 SYSTEM/Administrators 可写（ACL 由服务创建时设置） |
 
 厂商驱动级配置（风扇曲线/超频）需要内核驱动，超出本项目范围——executor 插件接口已预留，仅实现 OS 级可调项。
@@ -84,8 +93,9 @@ cmake --build --preset win-x64 --parallel
 ctest --preset win-x64
 
 # 冒烟：先起服务（控制台模式），再订阅遥测流 10 秒
+# 注：当前 gRPC 不支持 np:，服务会回退到 127.0.0.1:50051，冒烟工具需显式指定端点
 out\build\win-x64\apps\hwpanel-service\hwpanel-service.exe --console
-out\build\win-x64\tools\hwpanel-smoke\hwpanel-smoke.exe --seconds 10
+out\build\win-x64\tools\hwpanel-smoke\hwpanel-smoke.exe --endpoint 127.0.0.1:50051 --seconds 10
 
 # 安装包（windeployqt + Inno Setup 6 → out\packages\HWPanel-Setup-*.exe）
 scripts\build-installer.ps1
@@ -102,9 +112,19 @@ scripts\install-service.ps1 -Uninstall     # 停止 + 删除
 
 服务端日志三路输出：spdlog（控制台 + `%ProgramData%\HWPanel\logs\` 滚动文件）、Windows 事件日志（源 `HWPanel`，warn 及以上）、ETW TraceLogging provider **`HWPanel.Service`**（GUID `{8F3A2B1C-4D5E-4F6A-9B8C-7D6E5F4A3B2C}`，每条日志一个事件）。
 
+> **事件源注册（必读）**：`EventLogSink` 调 `RegisterEventSourceW(nullptr, "HWPanel")`。若来源 `HWPanel`
+> 未在注册表登记，Windows 会降级用 `EventCreateGeneric` 写入——事件确实存在，但 `Message` 为空，
+> 且**带 `ProviderName` 的 `Get-WinEvent -FilterHashtable` 查询会报拒绝访问**（Win11 家庭版已实测）。
+> 因此 `install-service.ps1` 与 Inno 安装包的 `[Registry]` 段都会显式登记该来源
+> （`EventMessageFile=%SystemRoot%\System32\EventCreateGeneric.exe`、`TypesSupported=7`），卸载时一并清理。
+> 未登记来源时请改用无过滤器读取 + 客户端过滤：
+
 ```powershell
-# 事件日志
-Get-WinEvent -LogName Application -MaxEvents 50 | Where-Object ProviderName -eq 'HWPanel'
+# 事件日志（来源已登记，可直接按 ProviderName 过滤）
+Get-WinEvent -FilterHashtable @{ LogName='Application'; ProviderName='HWPanel' } -MaxEvents 20
+
+# 兜底：来源未登记 / 查询被拒时，读全量再客户端过滤
+Get-WinEvent -LogName Application -MaxEvents 300 | Where-Object ProviderName -eq 'HWPanel'
 
 # ETW 实时捕获（管理员，Windows SDK tracelog / PerfView / wpr）
 logman start hwpanel-etw -p "{8F3A2B1C-4D5E-4F6A-9B8C-7D6E5F4A3B2C}" 0xffffffffffffffff 0xff -o C:\Temp\hwpanel.etl -ets
