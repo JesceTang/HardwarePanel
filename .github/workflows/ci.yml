@@ -84,9 +84,12 @@ jobs:
       - name: Install Inno Setup 6
         shell: pwsh
         run: |
-          Invoke-WebRequest -Uri 'https://jrsoftware.org/download.php/is.exe' -OutFile "$env:RUNNER_TEMP\is.exe" -UseBasicParsing
-          Start-Process "$env:RUNNER_TEMP\is.exe" -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait
-          echo "ISCC=${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" >> $env:GITHUB_ENV
+          # 第6个CI缺陷（真机runner暴露）：jrsoftware.org/download.php/is.exe 对 GitHub runner
+          # 数据中心 IP 常被限流/不可达，Invoke-WebRequest 在 2s 内 exit 1，导致 installer job
+          # 失败、service-smoke 被 skipped（run #2 实测）。改用 runner 预装的 Chocolatey 安装，
+          # 来源稳定；Inno Setup 6 装到标准路径 ${ProgramFiles(x86)}\Inno Setup 6\ISCC.exe，
+          # build-installer.ps1 的 Get-Command iscc / 已知路径回退可直接定位（无需 $env:ISCC）。
+          choco install innosetup -y --no-progress
 
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
