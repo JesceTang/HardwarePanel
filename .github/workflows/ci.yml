@@ -90,6 +90,9 @@ jobs:
           # 来源稳定；Inno Setup 6 装到标准路径 ${ProgramFiles(x86)}\Inno Setup 6\ISCC.exe，
           # build-installer.ps1 的 Get-Command iscc / 已知路径回退可直接定位（无需 $env:ISCC）。
           choco install innosetup -y --no-progress
+          # 将 Inno Setup 6 目录写入 GITHUB_PATH，使后续步骤 build-installer.ps1 的 Get-Command iscc 直接命中
+          $inno = "${env:ProgramFiles(x86)}\Inno Setup 6"
+          if (Test-Path (Join-Path $inno 'ISCC.exe')) { Add-Content -Path $env:GITHUB_PATH -Value $inno }
 
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11

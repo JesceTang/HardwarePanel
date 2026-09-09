@@ -64,23 +64,47 @@ if (-not $qtDir) {
 if (-not $qtDir) { throw '找不到 Qt6（设置 Qt6_DIR 或安装到 E:\Qt）' }
 # Qt6_DIR 形如 ...\msvc2022_64\lib\cmake\Qt6，向上三级到套件根后取 bin
 $qtBin = Join-Path (Split-Path (Split-Path (Split-Path $qtDir))) 'bin'
-$windeployqt = Join-Path $qtBin 'windeployqt.exe'
-if (-not (Test-Path $windeployqt)) {
-    # 回退：CI 已将 qt_bin 加入 PATH
-    $cmd = Get-Command windeployqt.exe -ErrorAction SilentlyContinue
-    if (-not $cmd) { throw "找不到 windeployqt.exe（推导路径 $windeployqt）" }
-    $windeployqt = $cmd.Source
+# windeployqt：Qt6 提供 windeployqt.exe（部分版本另有 windeployqt6.exe）。先按推导路径找，
+# 再回退 PATH（CI 已将 qt_bin 注入 PATH），避免因 Qt 安装布局差异误判为缺失。
+$windeployqt = $null
+foreach ($cand in @((Join-Path $qtBin 'windeployqt.exe'), (Join-Path $qtBin 'windeployqt6.exe'))) {
+    if (Test-Path $cand) { $windeployqt = $cand; break }
+}
+if (-not $windeployqt) {
+    $cmd = Get-Command windeployqt.exe, windeployqt6.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { $windeployqt = $cmd.Source }
+}
+if (-not $windeployqt) {
+    # 用 ::error:: 工作流命令输出根因，使 GitHub 生成公开可读注解（无需鉴权即可从 check-run annotations 定位）
+    Write-Host "::error::windeployqt not found. Qt6_DIR=$qtDir qtBin=$qtBin PATH=$env:PATH"
+    throw "找不到 windeployqt.exe（推导目录 $qtBin；Qt6_DIR=$qtDir）"
 }
 
-$iscc = Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source
+# ISCC（Inno Setup 6 命令行编译器）：CI 由 choco 安装到 Program Files (x86)\Inno Setup 6，
+# 但 choco 不会把 ISCC 加入 PATH，Get-Command 常落空。依次尝试 $env:ISCC、PATH、已知安装路径、
+# choco lib 目录，最后在 Program Files 下的 Inno Setup* 目录兜底定位，覆盖各种安装来源/布局。
+$iscc = $null
+if ($env:ISCC -and (Test-Path $env:ISCC)) { $iscc = $env:ISCC }
+if (-not $iscc) {
+    $cmd = Get-Command iscc.exe, iscc -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($cmd) { $iscc = $cmd.Source }
+}
 if (-not $iscc) {
     foreach ($p in @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
                      "$env:ProgramFiles\Inno Setup 6\ISCC.exe",
-                     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe")) {
+                     "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe",
+                     "C:\ProgramData\chocolatey\lib\innosetup\tools\ISCC.exe")) {
         if (Test-Path $p) { $iscc = $p; break }
     }
 }
-if (-not $iscc) { throw '找不到 Inno Setup 6 (ISCC.exe)' }
+if (-not $iscc) {
+    $iscc = Get-ChildItem -Path @("${env:ProgramFiles(x86)}", "$env:ProgramFiles") -Directory -Filter 'Inno Setup*' -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName 'ISCC.exe' } | Where-Object { Test-Path $_ } | Select-Object -First 1
+}
+if (-not $iscc) {
+    Write-Host "::error::ISCC.exe (Inno Setup 6) not found. env_ISCC=$env:ISCC ProgramFilesX86=${env:ProgramFiles(x86)} PATH=$env:PATH"
+    throw '找不到 Inno Setup 6 (ISCC.exe)'
+}
 
 # ---- 构建 ----
 & $cmake --preset $Preset
