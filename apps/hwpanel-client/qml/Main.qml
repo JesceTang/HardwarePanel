@@ -60,6 +60,8 @@ ApplicationWindow {
         GridLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // 防止在 RowLayout 中被右栏挤到塌缩（曲线必须保有可视宽度）
+            Layout.minimumWidth: 480
             columns: 2
             rows: 3
             columnSpacing: 12
@@ -124,7 +126,10 @@ ApplicationWindow {
 
         // ---- Right column: profiles + notifications -----------------------
         ColumnLayout {
+            // 固定宽度：preferred/minimum/maximum 同值，避免 RowLayout 把多余空间分给本栏
             Layout.preferredWidth: 320
+            Layout.minimumWidth: 320
+            Layout.maximumWidth: 320
             Layout.fillHeight: true
             spacing: 12
 

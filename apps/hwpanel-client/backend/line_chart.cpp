@@ -70,7 +70,9 @@ QSGNode* LineChart::updatePaintNode(QSGNode* old_node, UpdatePaintNodeData*) {
     node = new QSGGeometryNode;
     auto* geometry = new QSGGeometry(QSGGeometry::defaultAttributes_Point2D(), 0);
     geometry->setDrawingMode(QSGGeometry::DrawLineStrip);
-    geometry->setLineWidth(2.0f);
+    // RHI 仅支持 lineWidth==1（>1 会打印 "Line widths other than 1 are not
+    // supported by the graphics API" 且仍按 1 渲染），故显式设 1 保持确定且无告警。
+    geometry->setLineWidth(1.0f);
     node->setGeometry(geometry);
     node->setFlag(QSGNode::OwnsGeometry);
 
