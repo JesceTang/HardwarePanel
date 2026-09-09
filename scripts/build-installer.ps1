@@ -56,12 +56,19 @@ if (-not $cmake) {
 } else { $cmake = $cmake.Source }
 
 $qtDir = $env:Qt6_DIR
+# CI 回退：jurplel/install-qt-action 全局导出 QT_ROOT_DIR(→ ...\Qt\<ver>\msvc2022_64) 并将 Qt bin 加入 PATH，
+# 但其 steps.qt.outputs.qt_dir 为空(run #5 探针注解 MISSING Qt6_DIR 证实)，故 $env:Qt6_DIR 空时用 QT_ROOT_DIR 派生。
+if (-not $qtDir -and $env:QT_ROOT_DIR) { $qtDir = Join-Path $env:QT_ROOT_DIR 'lib\cmake\Qt6' }
 if (-not $qtDir) {
     # 本地回退：aqt 安装布局 E:\Qt\6.x\msvc2022_64\lib\cmake\Qt6
     $qtDir = Get-ChildItem 'E:\Qt\6.*\msvc2022_64\lib\cmake\Qt6' -ErrorAction SilentlyContinue |
              Sort-Object FullName | Select-Object -Last 1 -ExpandProperty FullName
 }
-if (-not $qtDir) { throw '找不到 Qt6（设置 Qt6_DIR 或安装到 E:\Qt）' }
+if (-not $qtDir) {
+    # ::error:: 注解公开可读（匿名无法读日志），定位 Qt 解析失败根因
+    Write-Host "::error::Qt6 not found. env Qt6_DIR=$env:Qt6_DIR QT_ROOT_DIR=$env:QT_ROOT_DIR"
+    throw '找不到 Qt6（设置 Qt6_DIR / QT_ROOT_DIR 或安装到 E:\Qt）'
+}
 # Qt6_DIR 形如 ...\msvc2022_64\lib\cmake\Qt6，向上三级到套件根后取 bin
 $qtBin = Join-Path (Split-Path (Split-Path (Split-Path $qtDir))) 'bin'
 # windeployqt：Qt6 提供 windeployqt.exe（部分版本另有 windeployqt6.exe）。先按推导路径找，

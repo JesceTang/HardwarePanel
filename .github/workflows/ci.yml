@@ -112,51 +112,15 @@ jobs:
             C:\Users\runneradmin\AppData\Local\vcpkg\archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
 
-      # 诊断探针：用不同退出码编码“缺失的工具”（匿名无法读日志，但 “Process completed
-      # with exit code N” 注解可靠可见）：21=cl 22=cmake 23=vcpkg.cmake 24=Qt6_DIR 25=windeployqt 26=iscc。
-      - name: Probe installer toolchain (distinct exit codes pinpoint missing tool)
-        shell: pwsh
-        env:
-          Qt6_DIR: ${{ steps.qt.outputs.qt_dir }}
-          VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-        run: |
-          $env:PATH = "${{ steps.qt.outputs.qt_bin }};" + $env:PATH
-          $cl = (Get-Command cl.exe -ErrorAction SilentlyContinue).Source
-          $cm = (Get-Command cmake -ErrorAction SilentlyContinue).Source
-          $tc = Join-Path $env:VCPKG_ROOT 'scripts\buildsystems\vcpkg.cmake'
-          Write-Host "qt_bin_output=${{ steps.qt.outputs.qt_bin }}"
-          Write-Host "cl=$cl"
-          Write-Host "cmake=$cm"
-          Write-Host "VCPKG_ROOT=$env:VCPKG_ROOT toolchain_exists=$(Test-Path $tc)"
-          Write-Host "Qt6_DIR=$env:Qt6_DIR"
-          if (-not $cl) { Write-Host "::error::MISSING cl.exe"; exit 21 }
-          if (-not $cm) { Write-Host "::error::MISSING cmake"; exit 22 }
-          if (-not (Test-Path $tc)) { Write-Host "::error::MISSING vcpkg.cmake at $tc"; exit 23 }
-          if (-not $env:Qt6_DIR) { Write-Host "::error::MISSING Qt6_DIR"; exit 24 }
-          $qtBin = Join-Path (Split-Path (Split-Path (Split-Path $env:Qt6_DIR))) 'bin'
-          $wd = @(Get-ChildItem -Path $qtBin -Filter 'windeployqt*.exe' -ErrorAction SilentlyContinue)
-          $wdc = (Get-Command windeployqt.exe,windeployqt6.exe -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-          Write-Host "qtBin_derived=$qtBin windeployqt_in_qtBin=$(($wd.Name) -join ',') windeployqt_on_PATH=$wdc"
-          if ($wd.Count -eq 0 -and -not $wdc) { Write-Host "::error::MISSING windeployqt (qtBin=$qtBin)"; exit 25 }
-          $ipaths = @("${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe","$env:ProgramFiles\Inno Setup 6\ISCC.exe","$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe","C:\ProgramData\chocolatey\lib\innosetup\tools\ISCC.exe")
-          foreach ($p in $ipaths) { Write-Host "iscc_check $p => $(Test-Path $p)" }
-          Get-ChildItem 'C:\Program Files (x86)','C:\Program Files' -Directory -Filter 'Inno*' -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "inno_dir=$($_.FullName)" }
-          $icmd = (Get-Command iscc.exe,iscc -ErrorAction SilentlyContinue | Select-Object -First 1).Source
-          $ifound = $ipaths | Where-Object { Test-Path $_ } | Select-Object -First 1
-          Write-Host "iscc_on_PATH=$icmd iscc_found_path=$ifound"
-          if (-not $ifound -and -not $icmd) { Write-Host "::error::MISSING iscc"; exit 26 }
-          Write-Host "ALL_INSTALLER_TOOLS_PRESENT"
-
       - name: Build installer (windeployqt + Inno)
         shell: pwsh
         env:
-          Qt6_DIR: ${{ steps.qt.outputs.qt_dir }}
+          # install-qt-action 全局导出 QT_ROOT_DIR(→ ...\Qt\6.8.3\msvc2022_64)、将 Qt bin 加入 PATH、
+          # 并设置 CMAKE_PREFIX_PATH；但 steps.qt.outputs.qt_dir/qt_bin 为空(run #5 探针注解 MISSING Qt6_DIR 证实)。
+          # 故这里不再依赖空输出：build-installer.ps1 从 QT_ROOT_DIR 派生 Qt6_DIR/windeployqt，
+          # cmake --preset 靠全局 CMAKE_PREFIX_PATH 找到 Qt6（与 build-and-test 同源，已三轮全绿）。
           VCPKG_ROOT: ${{ github.workspace }}/vcpkg
-        run: |
-          # windeployqt 位于 qt_bin；入 PATH 后 build-installer.ps1 能直接定位
-          echo "${{ steps.qt.outputs.qt_bin }}" >> $env:GITHUB_PATH
-          $env:PATH = "${{ steps.qt.outputs.qt_bin }};" + $env:PATH
-          .\scripts\build-installer.ps1 -Preset win-x64-ci
+        run: .\scripts\build-installer.ps1 -Preset win-x64-ci
 
       - name: Upload installer artifact
         uses: actions/upload-artifact@v4
