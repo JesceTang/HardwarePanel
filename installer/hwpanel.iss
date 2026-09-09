@@ -1,4 +1,4 @@
-; HWPanel Inno Setup 6 安装包脚本
+﻿; HWPanel Inno Setup 6 安装包脚本
 ; 前置：scripts\build-installer.ps1 已把 windeployqt 产物与二进制放入 staging 目录
 ; 手动编译：iscc /DBaseDir=<staging> installer\hwpanel.iss
 
@@ -64,8 +64,9 @@ Filename: "sc.exe"; Parameters: "start {#MySvcName}"; Flags: runhidden
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,HWPanel}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; 卸载清理：停止并删除服务（M6 验收：卸载→重装循环无残留）
-Filename: "sc.exe"; Parameters: "stop {#MySvcName}"; Flags: runhidden; RunOnceId: "StopSvc"
+; 卸载清理：服务的停止/强制结束已在 [Code] CurUninstallStepChanged(usUninstall) 中
+; 于删除文件之前同步完成（sc stop 异步返回、进程终止可能滞后，会锁住 exe）。
+; 此处仅负责删除服务登记（M6 验收：卸载→重装循环无残留）。
 Filename: "sc.exe"; Parameters: "delete {#MySvcName}"; Flags: runhidden; RunOnceId: "DelSvc"
 
 [UninstallDelete]
@@ -80,11 +81,31 @@ var
   ResultCode: Integer;
 begin
   Exec('sc.exe', 'stop {#MySvcName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Sleep(1500);
+  Sleep(2500);
+  // 兜底强制结束：sc stop 异步返回，进程终止（gRPC 后台线程/静态析构）
+  // 可能滞后数秒并锁住 exe，导致覆盖安装时文件写入失败。
+  Exec('taskkill.exe', '/F /IM {#MySvcExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+// 卸载：在删除 {app} 文件之前同步停止服务并强制结束进程，避免 exe 被占用而残留。
+procedure StopServiceForUninstall();
+var
+  ResultCode: Integer;
+begin
+  Exec('sc.exe', 'stop {#MySvcName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Sleep(2500);
+  Exec('taskkill.exe', '/F /IM {#MySvcExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssInstall then
     StopExistingService();
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  // usUninstall 在删除文件与 [UninstallRun] 之前触发，确保进程已退出。
+  if CurUninstallStep = usUninstall then
+    StopServiceForUninstall();
 end;

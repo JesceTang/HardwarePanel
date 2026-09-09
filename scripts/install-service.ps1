@@ -22,6 +22,16 @@ if ($Uninstall) {
     if ($svc) {
         if ($svc.Status -ne 'Stopped') { Stop-Service -Name $ServiceName -Force }
         sc.exe delete $ServiceName | Out-Null
+        # 等待进程真正退出：Stop-Service 在服务报告 STOPPED 时即返回，但进程终止
+        # （gRPC 后台线程/静态析构）可能滞后数秒；不等待会被误判为“卸载残留”。
+        $deadline = (Get-Date).AddSeconds(10)
+        while ((Get-Date) -lt $deadline) {
+            if (-not (Get-Process -Name 'hwpanel-service' -ErrorAction SilentlyContinue)) { break }
+            Start-Sleep -Milliseconds 300
+        }
+        # 兜底：仍存活则强制结束，确保 M6“卸载无残留”确定性。
+        $lingering = Get-Process -Name 'hwpanel-service' -ErrorAction SilentlyContinue
+        if ($lingering) { $lingering | Stop-Process -Force; Start-Sleep -Milliseconds 500 }
         # 同步清理事件日志来源注册（M6 验收：卸载无残留）
         $srcKey = "HKLM:\SYSTEM\CurrentControlSet\Services\EventLog\Application\HWPanel"
         if (Test-Path $srcKey) { Remove-Item -Recurse -Force $srcKey }

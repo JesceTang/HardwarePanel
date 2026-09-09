@@ -74,6 +74,13 @@ if (-not $svcExe -or -not $clientExe) { throw '未找到构建产物 hwpanel-ser
 Copy-Item $svcExe.FullName $staging
 Copy-Item $clientExe.FullName $staging
 
+# vcpkg applocal 运行库：服务/客户端 exe 同目录下的依赖 DLL（grpc/protobuf/abseil/
+# spdlog/openssl/re2/cares/zlib 等）必须一并 staging；否则安装到 Program Files 后
+# 服务因缺 DLL 无法加载而启动失败（sc start 后立即 Stopped）。只拷 *.dll，
+# 排除同目录的 .ilk/.pdb（数百 MB 调试产物）。
+Copy-Item (Join-Path $svcExe.DirectoryName '*.dll') $staging -Force
+Copy-Item (Join-Path $clientExe.DirectoryName '*.dll') $staging -Force
+
 # Qt 运行库 + QML 插件部署（客户端为 GUI 程序）
 & $windeployqt --release --no-translations --no-system-d3d-compiler --no-opengl-sw `
     --qmldir (Join-Path $repo 'apps\hwpanel-client\qml') `

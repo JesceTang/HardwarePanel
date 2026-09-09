@@ -30,32 +30,48 @@ if ($events.Count -eq 0) { throw 'no HWPanel events in Application log' }
 Write-Host "[smoke] event log source HWPanel present ($($events.Count) events)"
 
 # ---- taskkill → SCM 崩溃恢复（sc failure restart/10000）应 ≤30 s 自恢复 ----
+# 自恢复判据取“服务重新进入 Running”，而非仅进程存在：SCM 重启进程后仍需走完
+# START_PENDING→RUNNING，此期间无法稳定暂停。以 Running 为准既贴合验收语义，也保证
+# 随后的 pause 针对已完全启动的服务（避免与启动窗口竞态）。
 $proc = Get-Process -Name hwpanel-service -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $proc) { throw 'hwpanel-service process not found' }
 $oldPid = $proc.Id
 taskkill /F /PID $oldPid | Out-Null
-Write-Host "[smoke] killed pid $oldPid, awaiting SCM recovery (<=30s)"
+Write-Host "[smoke] killed pid $oldPid, awaiting SCM recovery to Running (<=30s)"
 $deadline = (Get-Date).AddSeconds(30)
 $recovered = $false
 while ((Get-Date) -lt $deadline) {
-    Start-Sleep -Seconds 2
-    if (Get-Process -Name hwpanel-service -ErrorAction SilentlyContinue) { $recovered = $true; break }
+    Start-Sleep -Milliseconds 500
+    if ((Get-Service -Name $svc -ErrorAction SilentlyContinue).Status -eq 'Running') { $recovered = $true; break }
 }
-if (-not $recovered) { throw 'service did not self-recover within 30 s' }
-Write-Host "[smoke] self-recovered within 30 s"
+if (-not $recovered) { throw 'service did not self-recover to Running within 30 s' }
+Write-Host "[smoke] self-recovered to Running within 30 s"
 
-# ---- 暂停 / 继续 ----
+# ---- 暂停 / 继续（轮询等待状态迁移，替代固定 sleep）----
+function Wait-SvcState([string]$target, [int]$timeoutSec) {
+    $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($sw.Elapsed.TotalSeconds -lt $timeoutSec) {
+        if ((Get-Service -Name $svc -ErrorAction SilentlyContinue).Status -eq $target) { return $true }
+        Start-Sleep -Milliseconds 200
+    }
+    return $false
+}
 sc.exe pause $svc | Out-Null
-Start-Sleep -Seconds 2
-if ((Get-Service -Name $svc).Status -ne 'Paused') { throw 'pause did not reach Paused' }
+if (-not (Wait-SvcState 'Paused' 10)) { throw 'pause did not reach Paused' }
 sc.exe continue $svc | Out-Null
-Start-Sleep -Seconds 2
-if ((Get-Service -Name $svc).Status -ne 'Running') { throw 'continue did not reach Running' }
+if (-not (Wait-SvcState 'Running' 10)) { throw 'continue did not reach Running' }
 Write-Host "[smoke] pause/continue OK"
 
 # ---- 可选：卸载并断言无残留 ----
 if ($UninstallAtEnd) {
     & (Join-Path $PSScriptRoot 'install-service.ps1') -Uninstall
+    # 轮询确认无残留：服务删除与进程退出可能有短暂滞后（install-service 已含等待+兜底）。
+    $deadline = (Get-Date).AddSeconds(10)
+    while ((Get-Date) -lt $deadline) {
+        if (-not (Get-Service -Name $svc -ErrorAction SilentlyContinue) -and
+            -not (Get-Process -Name hwpanel-service -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Milliseconds 300
+    }
     if (Get-Service -Name $svc -ErrorAction SilentlyContinue) { throw 'service residue after uninstall' }
     if (Get-Process -Name hwpanel-service -ErrorAction SilentlyContinue) { throw 'process residue after uninstall' }
     Write-Host '[smoke] uninstall clean'
