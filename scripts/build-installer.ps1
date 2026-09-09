@@ -10,8 +10,33 @@ $buildDir = Join-Path $repo "out\build\$Preset"
 $staging = Join-Path $repo 'out\installer'
 
 # ---- MSVC 工具链环境（vcvars），保证裸 shell 下 configure/build 可用 ----
-$vcvars = 'E:\VSBuildTools\VC\Auxiliary\Build\vcvars64.bat'
-if (Test-Path $vcvars) {
+# Ninja 生成器需要 cl.exe/ninja/cmake 在 PATH。CI 已由 ilammy/msvc-dev-cmd 注入（此时 cl 已在
+# PATH，直接跳过）；本地/独立运行时用 vswhere 可移植地定位 VS 安装，回退到已知候选路径，
+# 避免写死开发机目录（本机 VS 在 E:\VSBuildTools，CI runner 在 C:\Program Files\...）。
+if (-not (Get-Command cl.exe -ErrorAction SilentlyContinue)) {
+    $vcvars = $null
+    $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (Test-Path $vswhere) {
+        $vsPath = & $vswhere -latest -products * `
+                  -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+                  -property installationPath | Select-Object -First 1
+        if ($vsPath) {
+            $candidate = Join-Path $vsPath 'VC\Auxiliary\Build\vcvars64.bat'
+            if (Test-Path $candidate) { $vcvars = $candidate }
+        }
+    }
+    if (-not $vcvars) {
+        foreach ($p in @(
+            'E:\VSBuildTools\VC\Auxiliary\Build\vcvars64.bat',
+            'C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat',
+            'C:\Program Files\Microsoft Visual Studio\2022\Professional\VC\Auxiliary\Build\vcvars64.bat',
+            'C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat',
+            'C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat'
+        )) {
+            if (Test-Path $p) { $vcvars = $p; break }
+        }
+    }
+    if (-not $vcvars) { throw '找不到 vcvars64.bat（需要 VS2022 MSVC 工具链；若已在 PATH 提供 cl.exe 则不会走到这里）' }
     cmd /c "`"$vcvars`" && set" | ForEach-Object {
         if ($_ -match '^([^=]+)=(.*)$') { Set-Item -Path "env:$($Matches[1])" -Value $Matches[2] }
     }

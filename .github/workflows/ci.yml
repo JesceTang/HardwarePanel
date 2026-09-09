@@ -11,6 +11,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # MSVC 环境：win-x64-ci 用 Ninja 生成器，需要 cl.exe/ninja/cmake 在 PATH。
+      # GitHub runner 的 pwsh 步骤默认无 MSVC 环境（本地实测 CL_ON_BARE_PATH=NO），
+      # msvc-dev-cmd 等价于跑 vcvars64.bat，一次性注入 cl/ninja/cmake，否则 configure 找不到编译器。
+      - name: Setup MSVC environment (vcvars)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Install Qt 6.8
         id: qt
         uses: jurplel/install-qt-action@v4
@@ -25,6 +33,8 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: 98d7cb0cf1f4686a3e43aa5672b6230c1d56bce8
+          # 显式钉住克隆目录，与下面 Configure 步骤注入的 VCPKG_ROOT 保持一致（避免 action 默认值漂移）
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
 
       - name: Cache vcpkg packages
         uses: actions/cache@v4
@@ -54,6 +64,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 同 build-and-test：build-installer.ps1 内的 cmake --preset(Ninja) 需要 cl/ninja/cmake 在 PATH。
+      - name: Setup MSVC environment (vcvars)
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Install Qt 6.8
         id: qt
         uses: jurplel/install-qt-action@v4
@@ -73,6 +89,8 @@ jobs:
         uses: lukka/run-vcpkg@v11
         with:
           vcpkgGitCommitId: 98d7cb0cf1f4686a3e43aa5672b6230c1d56bce8
+          # 显式钉住克隆目录，与下面 Configure 步骤注入的 VCPKG_ROOT 保持一致（避免 action 默认值漂移）
+          vcpkgDirectory: ${{ github.workspace }}/vcpkg
 
       - name: Cache vcpkg packages
         uses: actions/cache@v4
