@@ -32,7 +32,10 @@ jobs:
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 98d7cb0cf1f4686a3e43aa5672b6230c1d56bce8
+          # 钉到 microsoft/vcpkg 官方 release 2026.07.29 的 commit（上游真实存在，且最接近本地验证版本）。
+          # 注：此前误用了本地镜像 zip 内嵌的 hash，该 hash 在上游 microsoft/vcpkg 不存在（API 返回 422），
+          # 导致 run-vcpkg 无法 checkout 而 Bootstrap vcpkg 步骤失败。
+          vcpkgGitCommitId: 9e593bb18ea69cc5095e012465dcd675a822ed0d
           # 显式钉住克隆目录，与下面 Configure 步骤注入的 VCPKG_ROOT 保持一致（避免 action 默认值漂移）
           vcpkgDirectory: ${{ github.workspace }}/vcpkg
 
@@ -88,7 +91,10 @@ jobs:
       - name: Bootstrap vcpkg
         uses: lukka/run-vcpkg@v11
         with:
-          vcpkgGitCommitId: 98d7cb0cf1f4686a3e43aa5672b6230c1d56bce8
+          # 钉到 microsoft/vcpkg 官方 release 2026.07.29 的 commit（上游真实存在，且最接近本地验证版本）。
+          # 注：此前误用了本地镜像 zip 内嵌的 hash，该 hash 在上游 microsoft/vcpkg 不存在（API 返回 422），
+          # 导致 run-vcpkg 无法 checkout 而 Bootstrap vcpkg 步骤失败。
+          vcpkgGitCommitId: 9e593bb18ea69cc5095e012465dcd675a822ed0d
           # 显式钉住克隆目录，与下面 Configure 步骤注入的 VCPKG_ROOT 保持一致（避免 action 默认值漂移）
           vcpkgDirectory: ${{ github.workspace }}/vcpkg
 
